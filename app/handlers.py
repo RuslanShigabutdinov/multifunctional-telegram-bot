@@ -14,7 +14,7 @@ from telegram.ext import (
 from app.responds import responds, respondsOld
 from services.database import DataBase
 from services.media.instagram import downloadInstagram
-from services.media.tiktok import downloadTikTok, deleteVideo, findLink
+from services.media.tiktok import downloadTikTok, findLink
 
 logger = logging.getLogger(__name__)
 
@@ -32,19 +32,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     link = findLink(text)
     if link is not None:
         if "tiktok.com" in link:
-            fileName = await downloadTikTok(link)
-            if fileName:
-                await update.message.reply_video(video=open(fileName, "rb"))
-                deleteVideo(fileName)
+            media = await downloadTikTok(link)
+            if media:
+                await update.message.reply_video(video=media.url)
             else:
                 await update.message.reply_text("Failed to download video.")
         elif "instagram.com/reel/" in link or "instagram.com/p/" in link:
-            fileName = await downloadInstagram(link)
-            if fileName:
-                await update.message.reply_video(video=open(fileName, "rb"))
-                deleteVideo(fileName)
+            media = await downloadInstagram(link)
+            if media:
+                if media.extension == ".jpeg":
+                    await update.message.reply_photo(photo=media.url)
+                else:
+                    await update.message.reply_video(video=media.url)
             else:
-                await update.message.reply_text("Failed to download video.")
+                await update.message.reply_text("Failed to download media.")
 
     if username != "amialmighty":
         chance = randint(0, 100)
