@@ -1,9 +1,13 @@
-import asyncio
 from time import time
 import requests
 
+def _normalize_extension(extension: str) -> str:
+    return extension if extension.startswith('.') else f'.{extension}'
+
+
 async def downloadVideo(link, extention='.mp4'):
-    fileName = f'{time()}{extention}'
+    normalized_extension = _normalize_extension(extention)
+    fileName = f'{time()}{normalized_extension}'
     response = requests.get(link, stream=True)
     if response.status_code == 200:
         with open(fileName, 'wb') as file:

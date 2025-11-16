@@ -1,0 +1,27 @@
+services:
+  bot:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_HOST: postgres
+    volumes:
+      - ./usage.json:/app/usage.json
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:latest
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: telegram_bot
+      POSTGRES_USER: telegram
+      POSTGRES_PASSWORD: telegram
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+
+volumes:
+  pgdata:

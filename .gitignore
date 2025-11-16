@@ -1,5 +1,6 @@
 __pycache__/
-env
+venv
+.env
 *.mp4
-env.py
 main.db
+usage.json
