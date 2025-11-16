@@ -1,3 +1,5 @@
+from typing import Optional
+
 from services.media.base import MediaDownloader, MediaInfo
 from utils.settings import get_settings
 
@@ -25,5 +27,5 @@ settings = get_settings()
 instagram_downloader = InstagramDownloader(settings.instagram_api_key)
 
 
-async def downloadInstagram(link):
+async def downloadInstagram(link) -> Optional[MediaInfo]:
     return await instagram_downloader.download(link)

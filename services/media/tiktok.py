@@ -1,6 +1,6 @@
 import logging
 import re
-from os import remove
+from typing import Optional
 
 from services.media.base import MediaDownloader, MediaInfo
 from services.usage import UsageTracker
@@ -11,10 +11,6 @@ def findLink(text):
     if answer is not None:
         return answer.group()
     return None
-
-def deleteVideo(fileName):
-    remove(fileName)
-
 
 class TikTokDownloader(MediaDownloader):
     api_url = "https://tiktok-video-no-watermark2.p.rapidapi.com/"
@@ -49,7 +45,7 @@ tiktok_downloader = TikTokDownloader(settings.tiktok_api_key)
 usage_tracker = UsageTracker(key="tiktok_requests_remaining", limit=150)
 
 
-async def downloadTikTok(link):
+async def downloadTikTok(link) -> Optional[MediaInfo]:
     if not usage_tracker.consume():
         logger.warning("TikTok request limit reached; skipping download.")
         return None
