@@ -16,7 +16,11 @@ Telegram bot that downloads TikTok/Instagram videos through RapidAPI services, k
    DATABASE_PASSWORD=<database_password>
    ```
 2. Ensure PostgreSQL is running and matches the credentials above (you can `docker-compose up postgres -d` to run only the DB locally).
-3. (Optional) Install dependencies and run directly:
+3. Apply database migrations (after installing dependencies):
+   ```bash
+   alembic upgrade head
+   ```
+4. (Optional) Install dependencies and run directly:
    ```bash
    python -m venv venv
    source venv/bin/activate
@@ -37,11 +41,18 @@ Run the bot, passing the same environment variables:
 ```bash
 docker run --rm \
   --env-file .env \
+  -e SKIP_MIGRATIONS=0 \
   -v $(pwd)/usage.json:/app/usage.json \
   telegram-media-bot
 ```
 
 Mounting `usage.json` is optional but keeps your RapidAPI usage counter persistent across restarts.
+The container entrypoint runs `alembic upgrade head` before starting the bot; set `SKIP_MIGRATIONS=1` if you already ran migrations externally.
+
+## Database migrations
+
+- Apply migrations: `alembic upgrade head`
+- Create a new migration after editing the schema: `alembic revision -m "my change"`
 
 ### docker-compose
 

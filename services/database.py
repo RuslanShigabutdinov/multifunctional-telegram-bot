@@ -55,68 +55,6 @@ class DataBase:
     def __init__(self, pool: AsyncConnectionPool) -> None:
         self.pool = pool
 
-    async def ensure_schema(self) -> None:
-        statements = (
-            """
-            CREATE TABLE IF NOT EXISTS group_chats(
-                id BIGINT PRIMARY KEY,
-                title VARCHAR(255),
-                type VARCHAR(30)
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS users(
-                id BIGINT PRIMARY KEY,
-                first_name VARCHAR(255),
-                username VARCHAR(255) UNIQUE
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS user_group_chats(
-                user_id BIGINT,
-                group_chat_id BIGINT,
-                PRIMARY KEY (user_id, group_chat_id),
-                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-                FOREIGN KEY(group_chat_id) REFERENCES group_chats(id) ON DELETE CASCADE
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS groups(
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(255),
-                group_chat_id BIGINT REFERENCES group_chats(id) ON DELETE CASCADE,
-                UNIQUE(group_chat_id, name)
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS user_groups(
-                user_id BIGINT,
-                group_id INTEGER,
-                PRIMARY KEY (user_id, group_id),
-                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-                FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE
-            )
-            """,
-        )
-
-        try:
-            async with self.pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    for statement in statements:
-                        await cur.execute(statement)
-                    await cur.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_users_username ON users (username)"
-                    )
-                    await cur.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_user_groups_group ON user_groups (group_id)"
-                    )
-                    await cur.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_user_group_chats_user ON user_group_chats (user_id)"
-                    )
-        except Exception as exc:  # pragma: no cover
-            logger.exception("Failed to ensure schema: %s", exc)
-            raise
-
     async def get_user(self, user_id: int):
         try:
             async with self.pool.connection() as conn:
@@ -564,7 +502,6 @@ async def init_database() -> None:
     _pool = AsyncConnectionPool(conninfo, min_size=1, max_size=10, open=False)
     await _pool.open()
     _db_instance = DataBase(_pool)
-    await _db_instance.ensure_schema()
 
 
 async def close_database() -> None:
