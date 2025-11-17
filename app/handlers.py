@@ -12,13 +12,17 @@ from telegram.ext import (
 )
 
 from app.responds import responds, respondsOld
-from services.database import DataBase
+from services.database import get_database
 from services.media.instagram import downloadInstagram
 from services.media.tiktok import downloadTikTok, findLink
 
 logger = logging.getLogger(__name__)
 
 SELECT_CHAT, ENTER_MESSAGE = range(2)
+
+
+async def _reply_db_error(update: Update) -> None:
+    await update.message.reply_text("База данных недоступна. Попробуйте позже.")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -28,6 +32,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text: str = update.message.text
     user = update.message.from_user
     username = user["username"]
+    db = get_database()
 
     link = findLink(text)
     if link is not None:
@@ -47,100 +52,98 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await update.message.reply_text("Failed to download media.")
 
-    if username != "amialmighty":
-        chance = randint(0, 100)
-        if chance == 69:
-            await update.message.reply_text(choice(responds))
+    try:
+        if text == "/create chat":
+            chatId = update.message.chat["id"]
+            title = update.message.chat["title"]
+            type = update.message.chat["type"]
+            status = await db.create_group_chat(chatId, title, type)
+            await update.message.reply_text(
+                "Чат был успешно создан" if status else "Что-то пошло не так"
+            )
 
-    if text == "/create chat":
-        chatId = update.message.chat["id"]
-        title = update.message.chat["title"]
-        type = update.message.chat["type"]
-        db = DataBase()
-        status = db.createGroupChat(chatId, title, type)
-        await update.message.reply_text(
-            "Чат был успешно создан" if status else "Что-то пошло не так"
-        )
+        elif text == "/create me":
+            chatId = update.message.chat["id"]
+            userId = update.message.from_user["id"]
+            firstName = update.message.from_user["first_name"]
+            username = update.message.from_user["username"]
+            chat = await db.get_group_chat(chatId)
+            if chat is None:
+                await update.message.reply_text("Сначала выполните /create chat в этом чате.")
+                return
+            status1 = await db.create_user(userId, firstName, username)
+            status2 = await db.add_group_chat_to_user(userId, chatId)
+            await update.message.reply_text(
+                "Пользователь был успешно добавлен"
+                if status1 and status2
+                else "Что-то пошло не так"
+            )
 
-    elif text == "/create me":
-        chatId = update.message.chat["id"]
-        userId = update.message.from_user["id"]
-        firstName = update.message.from_user["first_name"]
-        username = update.message.from_user["username"]
-        db = DataBase()
-        chat = db.getGroupChat(chatId)
-        if chat is None:
-            await update.message.reply_text("Сначала выполните /create chat в этом чате.")
-            return
-        status1 = db.createUser(userId, firstName, username)
-        status2 = db.addGroupChatToUser(userId, chatId)
-        await update.message.reply_text(
-            "Пользователь был успешно добавлен"
-            if status1 and status2
-            else "Что-то пошло не так"
-        )
+        elif text == "/update me":
+            userId = update.message.from_user["id"]
+            firstName = update.message.from_user["first_name"]
+            username = update.message.from_user["username"]
+            status = await db.update_user(userId, firstName, username)
+            await update.message.reply_text(
+                "Пользователь был успешно изменен" if status else "Что-то пошло не так"
+            )
 
-    elif text == "/update me":
-        userId = update.message.from_user["id"]
-        firstName = update.message.from_user["first_name"]
-        username = update.message.from_user["username"]
-        status = DataBase().updateUser(userId, firstName, username)
-        await update.message.reply_text(
-            "Пользователь был успешно изменен" if status else "Что-то пошло не так"
-        )
+        elif text.startswith("/create group "):
+            chatId = update.message.chat["id"]
+            message = await db.create_group(text, chatId)
+            await update.message.reply_text(message)
 
-    elif text.startswith("/create group "):
-        chatId = update.message.chat["id"]
-        message = DataBase().createGroup(text, chatId)
-        await update.message.reply_text(message)
+        elif text.startswith("/delete group name:"):
+            chatId = update.message.chat["id"]
+            status = await db.delete_group(text, chatId)
+            await update.message.reply_text(
+                "Group was succesfully delited" if status else "Something went wrong"
+            )
 
-    elif text.startswith("/delete group name:"):
-        chatId = update.message.chat["id"]
-        status = DataBase().deleteGroup(text, chatId)
-        await update.message.reply_text(
-            "Group was succesfully delited" if status else "Something went wrong"
-        )
+        elif text.startswith("/add to group "):
+            chatId = update.message.chat["id"]
+            message = await db.add_users_to_group(text, chatId)
+            await update.message.reply_text(message)
 
-    elif text.startswith("/add to group "):
-        chatId = update.message.chat["id"]
-        message = DataBase().addUsersToGroup(text, chatId)
-        await update.message.reply_text(message)
+        elif text.startswith("/delete users group "):
+            chatId = update.message.chat["id"]
+            message = await db.delete_users_from_group(text, chatId)
+            await update.message.reply_text(message)
 
-    elif text.startswith("/delete users group "):
-        chatId = update.message.chat["id"]
-        message = DataBase().deleteUsersFromGroup(text, chatId)
-        await update.message.reply_text(message)
+        if "@TikTokDownloaderRusBot" in text:
+            await update.message.reply_text(choice(respondsOld))
 
-    if "@TikTokDownloaderRusBot" in text:
-        await update.message.reply_text(choice(respondsOld))
-
-    if text == "/get_commands@TikTokDownloaderRusBot":
-        command_list = """/create chat - Add current chat to bot DB
+        if text == "/get_commands@TikTokDownloaderRusBot":
+            command_list = """/create chat - Add current chat to bot DB
 /create me - Add current user to bot DB
 /update me - Update user info in bot DB
 /create group name:{name} users:{username},{username} - Add group to chat
 /add to group name:{name} users:{username},{username} - Add users to group
 /delete group name:{name} - Delete group from chat
 /delete users group name:{name} users:{username},{username}- delete users from group"""
-        await update.message.reply_text(command_list)
+            await update.message.reply_text(command_list)
 
-    if "@all" in text:
-        usernames = DataBase().getAllUsernames(update.message.chat["id"])
-        await update.message.reply_text(usernames)
-    elif "@" in text:
-        groups = DataBase().getAllGroups(update.message.chat["id"])
-        for group in groups:
-            if "@" + group["name"] in text:
-                groupName = group["name"].replace("@", "")
-                chatId = update.message.chat["id"]
-                currentGroup = DataBase().getGroupByGroupChatIdAndName(
-                    chatId, groupName
-                )
-                editedText = text.replace("@" + groupName, "")
-                respondText = (
-                    DataBase().getUsernamesByGroup(currentGroup["id"]) + "\n" + editedText
-                )
-                await update.message.reply_text(respondText)
+        if "@all" in text:
+            usernames = await db.get_all_usernames(update.message.chat["id"])
+            await update.message.reply_text(usernames)
+        elif "@" in text:
+            groups = await db.get_groups_for_chat(update.message.chat["id"])
+            for group in groups:
+                if "@" + group["name"] in text:
+                    groupName = group["name"].replace("@", "")
+                    chatId = update.message.chat["id"]
+                    currentGroup = await db.get_group_by_chat_and_name(
+                        chatId, groupName
+                    )
+                    if not currentGroup:
+                        continue
+                    editedText = text.replace("@" + groupName, "")
+                    group_users = await db.get_usernames_by_group(currentGroup["id"])
+                    respondText = group_users + "\n" + editedText
+                    await update.message.reply_text(respondText)
+    except Exception as exc:  # pragma: no cover
+        logger.exception("Database operation failed: %s", exc)
+        await _reply_db_error(update)
 
 
 async def say_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -149,8 +152,14 @@ async def say_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     user_id = update.effective_user.id
-    db = DataBase()
-    chats = db.getGroupChatsForUser(user_id)
+    db = get_database()
+    try:
+        chats = await db.get_group_chats_for_user(user_id)
+    except Exception as exc:  # pragma: no cover
+        logger.exception("Failed to fetch chats for /say: %s", exc)
+        await _reply_db_error(update)
+        return ConversationHandler.END
+
     if not chats:
         await update.message.reply_text(
             "Я не знаю ни одного чата с вашим участием. Добавьте меня в чат и выполните /create chat и /create me."
