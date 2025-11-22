@@ -1,6 +1,7 @@
+import logging
+import re
 from random import randint
 from secrets import choice
-import logging
 
 from telegram import Update
 from telegram.ext import (
@@ -127,19 +128,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             usernames = await db.get_all_usernames(update.message.chat["id"])
             await update.message.reply_text(usernames)
         elif "@" in text:
-            groups = await db.get_groups_for_chat(update.message.chat["id"])
-            for group in groups:
-                if "@" + group["name"] in text:
-                    groupName = group["name"].replace("@", "")
-                    chatId = update.message.chat["id"]
-                    currentGroup = await db.get_group_by_chat_and_name(
-                        chatId, groupName
+            chatId = update.message.chat["id"]
+            mentions = set(re.findall(r"@(\w+)", text))
+            mentions.discard("all")
+            if mentions:
+                members_by_group = await db.get_group_members_by_names(
+                    chatId, list(mentions)
+                )
+                for group_name, usernames in members_by_group.items():
+                    editedText = text.replace(f"@{group_name}", "").strip()
+                    mention_list = (
+                        ", ".join(f"@{username}" for username in usernames)
+                        if usernames
+                        else "Не нашёл пользователей"
                     )
-                    if not currentGroup:
-                        continue
-                    editedText = text.replace("@" + groupName, "")
-                    group_users = await db.get_usernames_by_group(currentGroup["id"])
-                    respondText = group_users + "\n" + editedText
+                    respondText = (
+                        f"{mention_list}\n{editedText}" if editedText else mention_list
+                    )
                     await update.message.reply_text(respondText)
     except Exception as exc:  # pragma: no cover
         logger.exception("Database operation failed: %s", exc)
