@@ -430,6 +430,48 @@ class DataBase:
             for row in rows
         ]
 
+    async def get_group_members_by_names(
+        self, group_chat_id: int, names: list[str]
+    ) -> dict[str, list[str]]:
+        sanitized_names = []
+        for name in names:
+            cleaned = _sanitize_username(name)
+            if cleaned and GROUP_NAME_PATTERN.fullmatch(cleaned):
+                sanitized_names.append(cleaned)
+        if not sanitized_names:
+            return {}
+
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        SELECT g.name,
+                               COALESCE(
+                                   array_agg(u.username ORDER BY u.username)
+                                   FILTER (WHERE u.username IS NOT NULL),
+                                   '{}'
+                               ) AS usernames
+                        FROM groups g
+                        LEFT JOIN user_groups ug ON ug.group_id = g.id
+                        LEFT JOIN users u ON u.id = ug.user_id
+                        WHERE g.group_chat_id = %s AND g.name = ANY(%s)
+                        GROUP BY g.name
+                        """,
+                        (group_chat_id, sanitized_names),
+                    )
+                    rows = await cur.fetchall()
+        except Exception as exc:  # pragma: no cover
+            logger.exception(
+                "Failed to fetch group members for chat %s and names %s: %s",
+                group_chat_id,
+                sanitized_names,
+                exc,
+            )
+            return {}
+
+        return {row[0]: row[1] for row in rows}
+
     async def get_usernames_by_group(self, group_id: int) -> str:
         try:
             async with self.pool.connection() as conn:
