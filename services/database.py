@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from psycopg_pool import AsyncConnectionPool
 
@@ -516,6 +516,315 @@ class DataBase:
             )
             return []
         return [{"id": row[0], "title": row[1], "type": row[2]} for row in rows]
+
+    async def get_chat_users_paginated(
+        self, chat_id: int, limit: int, offset: int
+    ) -> Tuple[list[dict], int]:
+        """Возвращает пользователей чата с пагинацией.
+
+        :param chat_id: идентификатор чата
+        :param limit: количество записей на страницу
+        :param offset: смещение
+        :return: (список пользователей, всего пользователей)
+        """
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        SELECT u.id, u.first_name, u.username
+                        FROM users u
+                        JOIN user_group_chats ugc ON ugc.user_id = u.id
+                        WHERE ugc.group_chat_id = %s
+                        ORDER BY COALESCE(u.username, '') ASC, u.id ASC
+                        LIMIT %s OFFSET %s
+                        """,
+                        (chat_id, limit, offset),
+                    )
+                    rows = await cur.fetchall()
+
+                    await cur.execute(
+                        "SELECT COUNT(*) FROM user_group_chats WHERE group_chat_id = %s",
+                        (chat_id,),
+                    )
+                    total_row = await cur.fetchone()
+        except Exception as exc:  # pragma: no cover
+            logger.exception(
+                "Failed to fetch paginated users for chat %s (limit %s offset %s): %s",
+                chat_id,
+                limit,
+                offset,
+                exc,
+            )
+            return [], 0
+
+        users = [
+            {"id": row[0], "first_name": row[1], "username": row[2]} for row in rows
+        ]
+        total = total_row[0] if total_row else 0
+        return users, total
+
+    async def get_groups_paginated(
+        self, chat_id: int, limit: int, offset: int
+    ) -> Tuple[list[dict], int]:
+        """Возвращает группы чата с пагинацией.
+
+        :param chat_id: идентификатор чата
+        :param limit: количество записей на страницу
+        :param offset: смещение
+        :return: (список групп, всего групп)
+        """
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        SELECT id, name, group_chat_id
+                        FROM groups
+                        WHERE group_chat_id = %s
+                        ORDER BY name ASC, id ASC
+                        LIMIT %s OFFSET %s
+                        """,
+                        (chat_id, limit, offset),
+                    )
+                    rows = await cur.fetchall()
+                    await cur.execute(
+                        "SELECT COUNT(*) FROM groups WHERE group_chat_id = %s",
+                        (chat_id,),
+                    )
+                    total_row = await cur.fetchone()
+        except Exception as exc:  # pragma: no cover
+            logger.exception(
+                "Failed to fetch paginated groups for chat %s (limit %s offset %s): %s",
+                chat_id,
+                limit,
+                offset,
+                exc,
+            )
+            return [], 0
+        groups = [{"id": row[0], "name": row[1], "group_chat_id": row[2]} for row in rows]
+        total = total_row[0] if total_row else 0
+        return groups, total
+
+    async def get_group_user_ids(self, group_id: int) -> list[int]:
+        """Возвращает список user_id участников группы.
+
+        :param group_id: идентификатор группы
+        :return: список user_id
+        """
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT user_id FROM user_groups WHERE group_id = %s ORDER BY user_id",
+                        (group_id,),
+                    )
+                    rows = await cur.fetchall()
+        except Exception as exc:  # pragma: no cover
+            logger.exception("Failed to fetch user ids for group %s: %s", group_id, exc)
+            return []
+        return [row[0] for row in rows]
+
+    async def rename_group(
+        self, group_id: int, group_chat_id: int, new_name: str
+    ) -> tuple[bool, str]:
+        """Переименовывает группу.
+
+        :param group_id: идентификатор группы
+        :param group_chat_id: идентификатор чата
+        :param new_name: новое имя
+        :return: (успех, сообщение)
+        """
+        if not GROUP_NAME_PATTERN.fullmatch(new_name):
+            return False, "Неверное имя группы. Используйте только буквы, цифры и _"
+
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.transaction():
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            """
+                            SELECT 1 FROM groups
+                            WHERE group_chat_id = %s AND name = %s AND id <> %s
+                            """,
+                            (group_chat_id, new_name, group_id),
+                        )
+                        exists = await cur.fetchone()
+                        if exists:
+                            return False, "Группа с таким именем уже существует"
+
+                        await cur.execute(
+                            """
+                            UPDATE groups
+                            SET name = %s
+                            WHERE id = %s AND group_chat_id = %s
+                            """,
+                            (new_name, group_id, group_chat_id),
+                        )
+                        if cur.rowcount == 0:
+                            return False, "Группа не найдена"
+        except Exception as exc:  # pragma: no cover
+            logger.exception(
+                "Failed to rename group %s in chat %s to %s: %s",
+                group_id,
+                group_chat_id,
+                new_name,
+                exc,
+            )
+            return False, "Не удалось переименовать группу"
+
+        return True, f"Группа переименована в @{new_name}"
+
+    async def delete_group_by_id(self, group_id: int, group_chat_id: int) -> tuple[bool, str]:
+        """Удаляет группу по id.
+
+        :param group_id: идентификатор группы
+        :param group_chat_id: идентификатор чата
+        :return: (успех, сообщение)
+        """
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.transaction():
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "DELETE FROM groups WHERE id = %s AND group_chat_id = %s",
+                            (group_id, group_chat_id),
+                        )
+                        if cur.rowcount == 0:
+                            return False, "Группа не найдена"
+        except Exception as exc:  # pragma: no cover
+            logger.exception(
+                "Failed to delete group %s in chat %s: %s", group_id, group_chat_id, exc
+            )
+            return False, "Не удалось удалить группу"
+        return True, "Группа удалена"
+
+    async def create_group_with_users(
+        self, group_chat_id: int, name: str, user_ids: list[int]
+    ) -> tuple[bool, str, Optional[int], int]:
+        """Создаёт или обновляет группу и пересохраняет участников.
+
+        :param group_chat_id: идентификатор чата группы
+        :param name: имя группы
+        :param user_ids: выбранные user_id
+        :return: (успех, сообщение для пользователя, id группы, всего участников)
+        """
+        if not GROUP_NAME_PATTERN.fullmatch(name):
+            return False, "Неверное имя группы. Используйте только буквы, цифры и _", None, 0
+
+        unique_user_ids = list(dict.fromkeys(user_ids or []))
+
+        group_id: Optional[int] = None
+        total_members = 0
+
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.transaction():
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            """
+                            SELECT id FROM groups WHERE group_chat_id = %s AND name = %s
+                            """,
+                            (group_chat_id, name),
+                        )
+                        existing = await cur.fetchone()
+
+                        if existing:
+                            group_id = existing[0]
+                            created = False
+                        else:
+                            await cur.execute(
+                                """
+                                INSERT INTO groups(name, group_chat_id)
+                                VALUES(%s,%s)
+                                RETURNING id
+                                """,
+                                (name, group_chat_id),
+                            )
+                            row = await cur.fetchone()
+                            if not row:
+                                return False, "Не удалось создать группу", None, 0
+                            group_id = row[0]
+                            created = True
+
+                        await cur.execute(
+                            "DELETE FROM user_groups WHERE group_id = %s", (group_id,)
+                        )
+
+                        inserted = 0
+                        skipped = 0
+                        if unique_user_ids:
+                            await cur.execute(
+                                """
+                                SELECT u.id
+                                FROM users u
+                                JOIN user_group_chats ugc ON ugc.user_id = u.id
+                                WHERE ugc.group_chat_id = %s AND u.id = ANY(%s)
+                                """,
+                                (group_chat_id, unique_user_ids),
+                            )
+                            allowed_ids = [row[0] for row in await cur.fetchall()]
+
+                            for user_id in allowed_ids:
+                                await cur.execute(
+                                    """
+                                    INSERT INTO user_groups(user_id, group_id)
+                                    VALUES(%s,%s)
+                                    ON CONFLICT DO NOTHING
+                                    """,
+                                    (user_id, group_id),
+                                )
+                                if cur.rowcount:
+                                    inserted += 1
+
+                            skipped = len(unique_user_ids) - len(allowed_ids)
+
+        except Exception as exc:  # pragma: no cover
+            logger.exception(
+                "Failed to create/update group %s in chat %s with users %s: %s",
+                name,
+                group_chat_id,
+                unique_user_ids,
+                exc,
+            )
+            return False, "Не удалось сохранить группу", group_id, total_members
+
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT COUNT(*) FROM user_groups WHERE group_id = %s", (group_id,)
+                    )
+                    row = await cur.fetchone()
+                    total_members = row[0] if row else 0
+        except Exception as exc:  # pragma: no cover
+            logger.exception("Failed to count members for group %s: %s", group_id, exc)
+
+        action = "создана" if created else "обновлена"
+        parts = [f"Группа @{name} {action}."]
+        parts.append(f"Добавлено участников: {inserted}.")
+        if skipped > 0:
+            parts.append(f"Пропущено: {skipped} (нет в чате).")
+        return True, " ".join(parts), group_id, total_members
+
+    async def get_group_by_id(self, group_id: int):
+        """Возвращает группу по id.
+
+        :param group_id: идентификатор группы
+        :return: dict или None
+        """
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT id, name, group_chat_id FROM groups WHERE id = %s LIMIT 1",
+                        (group_id,),
+                    )
+                    row = await cur.fetchone()
+        except Exception as exc:  # pragma: no cover
+            logger.exception("Failed to fetch group by id %s: %s", group_id, exc)
+            return None
+        return {"id": row[0], "name": row[1], "group_chat_id": row[2]} if row else None
 
 
 _pool: AsyncConnectionPool | None = None
