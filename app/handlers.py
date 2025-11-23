@@ -1,7 +1,6 @@
 import logging
 import math
 import re
-from secrets import choice
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -12,10 +11,11 @@ from telegram.ext import (
     filters,
 )
 
-from app.responds import respondsOld
 from services.database import GROUP_NAME_PATTERN, get_database
+from services.gemini import generate_gemini_reply
 from services.media.instagram import downloadInstagram
 from services.media.tiktok import downloadTikTok, findLink
+from utils.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,54 @@ GRP_PROMPT_MSG = "grp_prompt_msg"
 
 async def _reply_db_error(update: Update) -> None:
     await update.message.reply_text("База данных недоступна. Попробуйте позже.")
+
+
+def _is_bot_mentioned(text: str, bot_name: str, bot_username: str) -> bool:
+    """Проверяет, есть ли в тексте упоминание бота по имени/username (с одной опечаткой)."""
+
+    def _distance_limited(a: str, b: str, max_dist: int = 1) -> int:
+        """Левенштейн с обрывом, чтобы поймать максимум одну опечатку."""
+        if abs(len(a) - len(b)) > max_dist:
+            return max_dist + 1
+        if not b:
+            return len(a)
+        prev = list(range(len(b) + 1))
+        for i, ca in enumerate(a, 1):
+            curr = [i]
+            min_row = curr[0]
+            for j, cb in enumerate(b, 1):
+                cost = 0 if ca == cb else 1
+                curr.append(min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost))
+                if curr[j] < min_row:
+                    min_row = curr[j]
+            if min_row > max_dist:
+                return max_dist + 1
+            prev = curr
+        return prev[-1]
+
+    lowered = text.casefold()
+    triggers: list[str] = []
+    if bot_name:
+        triggers.append(bot_name.casefold())
+    if bot_username:
+        normalized_username = bot_username.casefold()
+        triggers.extend([normalized_username, normalized_username.lstrip("@")])
+
+    # Сначала точные вхождения (включая @username).
+    if any(trigger and trigger in lowered for trigger in triggers):
+        return True
+
+    # Разрешаем одну опечатку в словах длиной 5+ символов.
+    tokens = re.findall(r"\w+", lowered)
+    for trigger in triggers:
+        if not trigger or len(trigger) < 5:
+            continue
+        for token in tokens:
+            if abs(len(token) - len(trigger)) > 1:
+                continue
+            if _distance_limited(token, trigger, 1) <= 1:
+                return True
+    return False
 
 
 def _reset_group_create_state(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -279,6 +327,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text: str = update.message.text
+    settings = get_settings().require()
+    bot_name = settings.bot_name
+    bot_username = settings.bot_username
     if text.startswith("/group_create") or text.startswith("/group-create"):
         return
     grp_stage = context.user_data.get(GRP_STAGE)
@@ -313,6 +364,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_video(video=media.url)
             else:
                 await update.message.reply_text("Failed to download media.")
+
+    bot_command_trigger = f"/get_commands{bot_username}" if bot_username else "/get_commands"
+    bot_pinged = _is_bot_mentioned(text, bot_name, bot_username)
 
     try:
         if text == "/create chat":
@@ -372,10 +426,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message = await db.delete_users_from_group(text, chatId)
             await update.message.reply_text(message)
 
-        if "@TikTokDownloaderRusBot" in text:
-            await update.message.reply_text(choice(respondsOld))
-
-        if text == "/get_commands@TikTokDownloaderRusBot":
+        if text == bot_command_trigger:
             command_list = """/create chat - Add current chat to bot DB
 /create me - Add current user to bot DB
 /update me - Update user info in bot DB
@@ -385,6 +436,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /delete group name:{name} - Delete group from chat
 /delete users group name:{name} users:{username},{username}- delete users from group"""
             await update.message.reply_text(command_list)
+        elif bot_pinged:
+            gemini_reply = await generate_gemini_reply(text)
+            if gemini_reply:
+                await update.message.reply_text(gemini_reply)
 
         if "@all" in text:
             usernames = await db.get_all_usernames(update.message.chat["id"])
