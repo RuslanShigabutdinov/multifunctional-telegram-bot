@@ -14,6 +14,10 @@ class Settings:
     telegram_bot_token: str
     tiktok_api_key: str
     instagram_api_key: str
+    gemini_api_key: str
+    gemini_model: str
+    bot_name: str
+    bot_username: str
     db_host: str
     db_port: int
     db_name: str
@@ -27,6 +31,10 @@ class Settings:
             telegram_bot_token=os.getenv("TOKEN", ""),
             tiktok_api_key=os.getenv("TIKTOK_KEY", ""),
             instagram_api_key=os.getenv("INSTAGRAM_KEY", ""),
+            gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+            gemini_model=os.getenv("GEMINI_MODEL", ""),
+            bot_name=os.getenv("BOT_NAME", ""),
+            bot_username=os.getenv("BOT_USERNAME", ""),
             db_host=os.getenv("DATABASE_HOST", ""),
             db_port=int(os.getenv("DATABASE_PORT", "5432")),
             db_name=os.getenv("DATABASE_NAME", ""),
@@ -42,6 +50,12 @@ class Settings:
             missing.append("TIKTOK_KEY")
         if not self.instagram_api_key:
             missing.append("INSTAGRAM_KEY")
+        if not self.gemini_api_key:
+            missing.append("GEMINI_API_KEY")
+        if not self.bot_name:
+            missing.append("BOT_NAME")
+        if not self.bot_username:
+            missing.append("BOT_USERNAME")
         if not self.db_host:
             missing.append("DATABASE_HOST")
         if not self.db_name:
