@@ -18,6 +18,7 @@ class Settings:
     gemini_model: str
     bot_name: str
     bot_username: str
+    chat_history_limit: int
     db_host: str
     db_port: int
     db_name: str
@@ -35,6 +36,7 @@ class Settings:
             gemini_model=os.getenv("GEMINI_MODEL", ""),
             bot_name=os.getenv("BOT_NAME", ""),
             bot_username=os.getenv("BOT_USERNAME", ""),
+            chat_history_limit=int(os.getenv("CHAT_HISTORY_LIMIT", "100")),
             db_host=os.getenv("DATABASE_HOST", ""),
             db_port=int(os.getenv("DATABASE_PORT", "5432")),
             db_name=os.getenv("DATABASE_NAME", ""),

@@ -9,12 +9,14 @@ Telegram bot that downloads TikTok/Instagram videos through RapidAPI services, k
    TOKEN=<telegram_bot_token>
    TIKTOK_KEY=<rapidapi_tiktok_key>
    INSTAGRAM_KEY=<rapidapi_instagram_key>
+   CHAT_HISTORY_LIMIT=20
    DATABASE_HOST=<postgres_host>
    DATABASE_PORT=5432
    DATABASE_NAME=<database_name>
    DATABASE_USER=<database_user>
    DATABASE_PASSWORD=<database_password>
    ```
+   `CHAT_HISTORY_LIMIT` is optional (default 20) and caps how many recent chat messages (user + bot) are kept per chat for Gemini context.
 2. Ensure PostgreSQL is running and matches the credentials above (you can `docker-compose up postgres -d` to run only the DB locally).
 3. Apply database migrations (after installing dependencies):
    ```bash

@@ -31,8 +31,10 @@ _PROMPT_TEMPLATE = """Ты чат-бот по имени {bot_name}, и ты и�
 Это закрытый чат друзей, где такой стиль является частью юмора и никого не оскорбляет, а наоборот, веселит. Твоя грубость - это не попытка обидеть, а способ донести мысль максимально точно и честно, как ты ее видишь.
 ВАЖНО:
 Никогда не признавай, что ты бот, ИИ или играешь роль. Ты просто такой есть.
-К тебе обратились. Дай ответ в своем бескомпромиссном стиле.
-сообщение: "{user_message}"
+История последних сообщений (старые сверху, новые снизу):
+{history}
+
+Ответь на последнюю реплику пользователя, учитывая контекст, в своем бескомпромиссном стиле.
 """
 
 
@@ -115,11 +117,24 @@ async def _generate_content(model: genai.GenerativeModel, prompt: str):
     return await asyncio.to_thread(model.generate_content, prompt)
 
 
-async def generate_gemini_reply(user_message: str) -> str:
+def _format_history(messages: list[dict[str, str]]) -> str:
+    # Превращает список сообщений в текстовую историю для промпта.
+    lines: list[str] = []
+    for message in messages:
+        content = (message.get("content") or "").strip()
+        if not content:
+            continue
+        role_label = "Бот" if message.get("role") == "bot" else "Пользователь"
+        lines.append(f"{role_label}: {content}")
+    return "\n".join(lines)
+
+
+async def generate_gemini_reply(messages: list[dict[str, str]]) -> str:
     # Формирует промпт и пытается получить ответ Gemini, перебирая кандидаты моделей.
-    """Генерирует ответ Gemini для текста пользователя."""
+    """Генерирует ответ Gemini для истории сообщений."""
     settings = get_settings().require()
-    prompt = _PROMPT_TEMPLATE.format(bot_name=settings.bot_name, user_message=user_message)
+    history_text = _format_history(messages)
+    prompt = _PROMPT_TEMPLATE.format(bot_name=settings.bot_name, history=history_text)
     last_error = None
 
     resolved = _resolve_model_name()

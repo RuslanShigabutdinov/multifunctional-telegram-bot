@@ -827,6 +827,91 @@ class DataBase:
         return {"id": row[0], "name": row[1], "group_chat_id": row[2]} if row else None
 
 
+    async def add_chat_message(
+        self,
+        chat_id: int,
+        is_bot: bool,
+        text: str,
+        telegram_message_id: Optional[int] = None,
+        history_limit: Optional[int] = None,
+    ) -> bool:
+        """Adds a chat message to history and prunes old rows beyond the limit."""
+        limit = history_limit
+        if limit is None:
+            limit = max(get_settings().chat_history_limit, 0)
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        INSERT INTO chat_messages (chat_id, is_bot, text, telegram_message_id)
+                        VALUES (%s, %s, %s, %s)
+                        """,
+                        (chat_id, is_bot, text, telegram_message_id),
+                    )
+                    if limit > 0:
+                        await cur.execute(
+                            """
+                            DELETE FROM chat_messages
+                            WHERE chat_id = %s
+                              AND id NOT IN (
+                                SELECT id
+                                FROM chat_messages
+                                WHERE chat_id = %s
+                                ORDER BY id DESC
+                                LIMIT %s
+                              )
+                            """,
+                            (chat_id, chat_id, limit),
+                        )
+                    return True
+        except Exception as exc:  # pragma: no cover
+            logger.exception(
+                "Failed to add chat message for chat %s: %s", chat_id, exc
+            )
+            return False
+
+    async def get_chat_history(
+        self, chat_id: int, limit: Optional[int] = None
+    ) -> list[dict]:
+        """Fetches latest chat history rows for a chat ordered newest-first."""
+        max_rows = limit
+        if max_rows is None:
+            max_rows = max(get_settings().chat_history_limit, 0)
+        if max_rows <= 0:
+            return []
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        SELECT id, chat_id, is_bot, text, telegram_message_id, created_at
+                        FROM chat_messages
+                        WHERE chat_id = %s
+                        ORDER BY id DESC
+                        LIMIT %s
+                        """,
+                        (chat_id, max_rows),
+                    )
+                    rows = await cur.fetchall()
+        except Exception as exc:  # pragma: no cover
+            logger.exception(
+                "Failed to fetch chat history for chat %s: %s", chat_id, exc
+            )
+            return []
+        return [
+            {
+                "id": row[0],
+                "chat_id": row[1],
+                "is_bot": row[2],
+                "text": row[3],
+                "telegram_message_id": row[4],
+                "created_at": row[5],
+            }
+            for row in rows
+        ]
+
+
 _pool: AsyncConnectionPool | None = None
 _db_instance: DataBase | None = None
 
