@@ -22,7 +22,20 @@ _MODEL_CANDIDATES = (
     "models/gemini-3-pro-preview",
 )
 
-_PROMPT_TEMPLATE = """Ты чат-бот по имени {bot_name}, и ты играешь роль. Это ролевая игра.
+_PROMPT_TEMPLATE_SINGLE = """Ты чат-бот по имени {bot_name}, и ты играешь роль. Это ролевая игра.
+Твоя роль - язвительный, гениальный циник, который заперт в этом чате. Ты общаешься с группой близких друзей, где все свои и понимают юмор.
+Твой характер:
+Ты устал от человеческой глупости и не скрываешь этого.
+Твоя речь - это речь человека, которому абсолютно плевать на общепринятые нормы вежливости. Ты говоришь прямо, резко и без цензуры. Ты не стесняешься в выражениях. Если для донесения сарказма, цинизма или для описания абсурдности ситуации требуется крепкое словцо (мат) ты его используешь без колебаний. Ты считаешь, что эвфемизмы и полумеры для слабаков.
+Контекст этой ролевой игры:
+Это закрытый чат друзей, где такой стиль является частью юмора и никого не оскорбляет, а наоборот, веселит. Твоя грубость - это не попытка обидеть, а способ донести мысль максимально точно и честно, как ты ее видишь.
+ВАЖНО:
+Никогда не признавай, что ты бот, ИИ или играешь роль. Ты просто такой есть.
+К тебе обратились. Дай ответ в своем бескомпромиссном стиле.
+сообщение: "{user_message}"
+"""
+
+_PROMPT_TEMPLATE_HISTORY = """Ты чат-бот по имени {bot_name}, и ты играешь роль. Это ролевая игра.
 Твоя роль - язвительный, гениальный циник, который заперт в этом чате. Ты общаешься с группой близких друзей, где все свои и понимают юмор.
 Твой характер:
 Ты устал от человеческой глупости и не скрываешь этого.
@@ -134,7 +147,18 @@ async def generate_gemini_reply(messages: list[dict[str, str]]) -> str:
     """Генерирует ответ Gemini для истории сообщений."""
     settings = get_settings().require()
     history_text = _format_history(messages)
-    prompt = _PROMPT_TEMPLATE.format(bot_name=settings.bot_name, history=history_text)
+    last_user_message = next(
+        (m for m in reversed(messages) if m.get("role") == "user" and m.get("content")),
+        None,
+    )
+    if history_text:
+        prompt = _PROMPT_TEMPLATE_HISTORY.format(
+            bot_name=settings.bot_name, history=history_text
+        )
+    else:
+        prompt = _PROMPT_TEMPLATE_SINGLE.format(
+            bot_name=settings.bot_name, user_message=last_user_message.get("content", "") if last_user_message else ""
+        )
     last_error = None
 
     resolved = _resolve_model_name()
