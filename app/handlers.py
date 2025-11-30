@@ -367,6 +367,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     bot_command_trigger = f"/get_commands{bot_username}" if bot_username else "/get_commands"
     bot_pinged = _is_bot_mentioned(text, bot_name, bot_username)
+    reply_to = update.message.reply_to_message
+    is_reply_to_bot = bool(
+        reply_to
+        and reply_to.from_user
+        and reply_to.from_user.id == context.bot.id
+        and reply_to.from_user.is_bot
+    )
 
     try:
         if text == "/create chat":
@@ -436,10 +443,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /delete group name:{name} - Delete group from chat
 /delete users group name:{name} users:{username},{username}- delete users from group"""
             await update.message.reply_text(command_list)
-        elif bot_pinged:
-            gemini_reply = await generate_gemini_reply(text)
+        elif bot_pinged or is_reply_to_bot:
+            chat_id = update.message.chat["id"]
+            history_rows = await db.get_chat_history(chat_id, settings.chat_history_limit)
+            history_messages = [
+                {"role": "bot" if row["is_bot"] else "user", "content": row["text"]}
+                for row in reversed(history_rows)
+                if row.get("text")
+            ]
+            history_messages.append({"role": "user", "content": text})
+
+            gemini_reply = await generate_gemini_reply(history_messages)
             if gemini_reply:
-                await update.message.reply_text(gemini_reply)
+                sent = await update.message.reply_text(gemini_reply)
+                await db.add_chat_message(chat_id, False, text, update.message.message_id)
+                await db.add_chat_message(
+                    chat_id,
+                    True,
+                    gemini_reply,
+                    getattr(sent, "message_id", None),
+                )
 
         if "@all" in text:
             usernames = await db.get_all_usernames(update.message.chat["id"])
