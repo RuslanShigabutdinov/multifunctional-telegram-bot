@@ -156,6 +156,45 @@ class DataBase:
             return None
         return {"id": row[0], "title": row[1], "type": row[2]} if row else None
 
+    async def migrate_chat(self, old_id: int, new_id: int) -> bool:
+        # Обновляет chat_id во всех таблицах при миграции группы в супергруппу.
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    # Копируем group_chats запись с новым id.
+                    await cur.execute(
+                        """
+                        INSERT INTO group_chats(id, title, type)
+                        SELECT %s, title, 'supergroup'
+                        FROM group_chats WHERE id = %s
+                        ON CONFLICT (id) DO NOTHING
+                        """,
+                        (new_id, old_id),
+                    )
+                    # Обновляем дочерние таблицы.
+                    await cur.execute(
+                        "UPDATE user_group_chats SET group_chat_id = %s WHERE group_chat_id = %s",
+                        (new_id, old_id),
+                    )
+                    await cur.execute(
+                        "UPDATE groups SET group_chat_id = %s WHERE group_chat_id = %s",
+                        (new_id, old_id),
+                    )
+                    await cur.execute(
+                        "UPDATE chat_messages SET chat_id = %s WHERE chat_id = %s",
+                        (new_id, old_id),
+                    )
+                    # Удаляем старую запись.
+                    await cur.execute(
+                        "DELETE FROM group_chats WHERE id = %s",
+                        (old_id,),
+                    )
+            logger.info("Migrated chat %s -> %s", old_id, new_id)
+            return True
+        except Exception as exc:  # pragma: no cover
+            logger.exception("Failed to migrate chat %s -> %s: %s", old_id, new_id, exc)
+            return False
+
     async def get_all_usernames(self, chat_id: int) -> str:
         try:
             async with self.pool.connection() as conn:

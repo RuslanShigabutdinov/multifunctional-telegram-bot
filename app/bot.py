@@ -20,6 +20,7 @@ from app.handlers import (
     group_command_start,
     group_handle_user_callback,
     group_menu_callback,
+    handle_chat_migration,
     handle_message,
     log_unknown_callback,
 )
@@ -73,6 +74,7 @@ def build_application() -> Application:
         .post_shutdown(_post_shutdown)
         .build()
     )
+    application.add_handler(MessageHandler(filters.StatusUpdate.MIGRATE, handle_chat_migration))
     application.add_handler(build_say_conversation_handler())
     application.add_handler(CommandHandler("group", group_command_start))
     application.add_handler(CallbackQueryHandler(group_menu_callback, pattern=r"^grp"))
