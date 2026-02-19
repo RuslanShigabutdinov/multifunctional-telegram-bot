@@ -484,7 +484,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             resolved_text = await _resolve_usernames(text, db)
             history_messages.append({"role": "user", "content": resolved_text, "name": sender_name})
 
-            gemini_reply = await generate_gemini_reply(history_messages)
+            admin_name = sender_name if sender_id == settings.admin_user_id else None
+            gemini_reply = await generate_gemini_reply(history_messages, admin_name=admin_name)
             if gemini_reply:
                 gemini_reply = gemini_reply.replace("@", "[at]")
                 try:
