@@ -8,7 +8,7 @@ class UsageTracker:
         self,
         key: str,
         limit: int,
-        storage_path: Path | str = Path("usage.json"),
+        storage_path: Path | str = Path("data/usage.json"),
     ) -> None:
         self.key = key
         self.limit = limit
@@ -16,7 +16,8 @@ class UsageTracker:
         self._data = self._load()
 
     def _load(self) -> Dict[str, int]:
-        if self.storage_path.exists():
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.storage_path.is_file():
             try:
                 return json.loads(self.storage_path.read_text())
             except json.JSONDecodeError:
