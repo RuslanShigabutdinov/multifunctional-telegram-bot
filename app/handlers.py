@@ -19,6 +19,19 @@ from utils.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
+
+async def _resolve_usernames(text: str, db) -> str:
+    """Заменяет @username упоминания в тексте на first_name из БД."""
+    mentions = re.findall(r"@(\w+)", text)
+    if not mentions:
+        return text
+    for username in set(mentions):
+        user = await db.get_user_by_username(username)
+        if user and user.get("first_name"):
+            text = text.replace(f"@{username}", user["first_name"])
+    return text
+
+
 def _strip_md(text: str) -> str:
     """Remove Markdown formatting symbols from text."""
     text = re.sub(r"```[^\S\n]*\w*\n?", "", text)  # code block fences
@@ -456,13 +469,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(command_list)
         elif bot_pinged or is_reply_to_bot:
             chat_id = update.message.chat["id"]
+            sender_id = update.message.from_user["id"]
+            sender_name = update.message.from_user["first_name"]
             history_rows = await db.get_chat_history(chat_id, settings.chat_history_limit)
             history_messages = [
-                {"role": "bot" if row["is_bot"] else "user", "content": row["text"]}
+                {
+                    "role": "bot" if row["is_bot"] else "user",
+                    "content": row["text"],
+                    "name": row.get("first_name"),
+                }
                 for row in reversed(history_rows)
                 if row.get("text")
             ]
-            history_messages.append({"role": "user", "content": text})
+            resolved_text = await _resolve_usernames(text, db)
+            history_messages.append({"role": "user", "content": resolved_text, "name": sender_name})
 
             gemini_reply = await generate_gemini_reply(history_messages)
             if gemini_reply:
@@ -475,7 +495,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     sent = await update.message.reply_text(
                         _strip_md(gemini_reply),
                     )
-                await db.add_chat_message(chat_id, False, text, update.message.message_id)
+                await db.add_chat_message(chat_id, False, text, update.message.message_id, user_id=sender_id)
                 await db.add_chat_message(
                     chat_id,
                     True,

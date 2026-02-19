@@ -139,7 +139,10 @@ def _format_history(messages: list[dict[str, str]]) -> str:
         content = (message.get("content") or "").strip()
         if not content:
             continue
-        role_label = "Бот" if message.get("role") == "bot" else "Пользователь"
+        if message.get("role") == "bot":
+            role_label = "Бот"
+        else:
+            role_label = message.get("name") or "Пользователь"
         lines.append(f"{role_label}: {content}")
     return "\n".join(lines)
 
