@@ -455,6 +455,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             gemini_reply = await generate_gemini_reply(history_messages)
             if gemini_reply:
+                gemini_reply = gemini_reply.replace("@", "[at]")
                 sent = await update.message.reply_text(gemini_reply)
                 await db.add_chat_message(chat_id, False, text, update.message.message_id)
                 await db.add_chat_message(
