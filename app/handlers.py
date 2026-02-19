@@ -19,6 +19,17 @@ from utils.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
+def _strip_md(text: str) -> str:
+    """Remove Markdown formatting symbols from text."""
+    text = re.sub(r"```[^\S\n]*\w*\n?", "", text)  # code block fences
+    text = re.sub(r"(?<!\w)\*\*(.+?)\*\*(?!\w)", r"\1", text)  # **bold**
+    text = re.sub(r"(?<!\w)__(.+?)__(?!\w)", r"\1", text)  # __bold__
+    text = re.sub(r"(?<!\w)\*(.+?)\*(?!\w)", r"\1", text)  # *italic*
+    text = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"\1", text)  # _italic_
+    text = re.sub(r"`(.+?)`", r"\1", text)  # `code`
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)  # # headers
+    return text
+
 (
     SAY_SELECT_CHAT,
     SAY_ENTER_MESSAGE,
@@ -456,7 +467,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             gemini_reply = await generate_gemini_reply(history_messages)
             if gemini_reply:
                 gemini_reply = gemini_reply.replace("@", "[at]")
-                sent = await update.message.reply_text(gemini_reply)
+                try:
+                    sent = await update.message.reply_text(
+                        gemini_reply, parse_mode="Markdown",
+                    )
+                except Exception:
+                    sent = await update.message.reply_text(
+                        _strip_md(gemini_reply),
+                    )
                 await db.add_chat_message(chat_id, False, text, update.message.message_id)
                 await db.add_chat_message(
                     chat_id,
