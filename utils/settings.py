@@ -24,6 +24,7 @@ class Settings:
     db_name: str
     db_user: str
     db_password: str
+    admin_user_id: int
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -42,6 +43,7 @@ class Settings:
             db_name=os.getenv("DATABASE_NAME", ""),
             db_user=os.getenv("DATABASE_USER", ""),
             db_password=os.getenv("DATABASE_PASSWORD", ""),
+            admin_user_id=int(os.getenv("ADMIN_USER_ID", "0")),
         )
 
     def require(self) -> "Settings":

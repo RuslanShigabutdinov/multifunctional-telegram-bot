@@ -833,6 +833,7 @@ class DataBase:
         is_bot: bool,
         text: str,
         telegram_message_id: Optional[int] = None,
+        user_id: Optional[int] = None,
         history_limit: Optional[int] = None,
     ) -> bool:
         """Adds a chat message to history and prunes old rows beyond the limit."""
@@ -844,10 +845,10 @@ class DataBase:
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
-                        INSERT INTO chat_messages (chat_id, is_bot, text, telegram_message_id)
-                        VALUES (%s, %s, %s, %s)
+                        INSERT INTO chat_messages (chat_id, is_bot, text, telegram_message_id, user_id)
+                        VALUES (%s, %s, %s, %s, %s)
                         """,
-                        (chat_id, is_bot, text, telegram_message_id),
+                        (chat_id, is_bot, text, telegram_message_id, user_id),
                     )
                     if limit > 0:
                         await cur.execute(
@@ -885,10 +886,13 @@ class DataBase:
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
-                        SELECT id, chat_id, is_bot, text, telegram_message_id, created_at
-                        FROM chat_messages
-                        WHERE chat_id = %s
-                        ORDER BY id DESC
+                        SELECT cm.id, cm.chat_id, cm.is_bot, cm.text,
+                               cm.telegram_message_id, cm.created_at, u.first_name
+                        FROM chat_messages cm
+                        LEFT JOIN users u ON cm.user_id = u.id
+                        WHERE cm.chat_id = %s
+                          AND cm.created_at >= NOW() - INTERVAL '12 hours'
+                        ORDER BY cm.id DESC
                         LIMIT %s
                         """,
                         (chat_id, max_rows),
@@ -907,6 +911,7 @@ class DataBase:
                 "text": row[3],
                 "telegram_message_id": row[4],
                 "created_at": row[5],
+                "first_name": row[6],
             }
             for row in rows
         ]
