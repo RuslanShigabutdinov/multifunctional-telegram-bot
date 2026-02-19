@@ -1285,6 +1285,17 @@ async def say_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def handle_chat_migration(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Обрабатывает миграцию группы в супергруппу — обновляет chat_id в БД.
+    msg = update.message
+    if not msg or not msg.migrate_to_chat_id:
+        return
+    old_id = msg.chat.id
+    new_id = msg.migrate_to_chat_id
+    db = get_database()
+    await db.migrate_chat(old_id, new_id)
+
+
 def build_say_conversation_handler():
     return ConversationHandler(
         entry_points=[CommandHandler("say", say_start)],
