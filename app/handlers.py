@@ -3,6 +3,7 @@ import math
 import re
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import ChatMigrated
 from telegram.ext import (
     CommandHandler,
     ContextTypes,
@@ -1263,10 +1264,19 @@ async def say_receive_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
     text_to_send = update.message.text
+    target_id = selected["id"]
     try:
-        await context.bot.send_message(chat_id=selected["id"], text=text_to_send)
+        await context.bot.send_message(chat_id=target_id, text=text_to_send)
         await update.message.reply_text(
-            f"Сообщение отправлено в {selected.get('title') or selected['id']}."
+            f"Сообщение отправлено в {selected.get('title') or target_id}."
+        )
+    except ChatMigrated as exc:
+        new_id = exc.new_chat_id
+        db = get_database()
+        await db.migrate_chat(target_id, new_id)
+        await context.bot.send_message(chat_id=new_id, text=text_to_send)
+        await update.message.reply_text(
+            f"Чат мигрировал. Сообщение отправлено в {selected.get('title') or new_id}."
         )
     except Exception as exc:  # pragma: no cover
         logger.exception("Failed to send /say message: %s", exc)
