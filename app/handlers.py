@@ -2,7 +2,7 @@ import logging
 import math
 import re
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo, Update
 from telegram.error import ChatMigrated
 from telegram.ext import (
     CommandHandler,
@@ -1304,6 +1304,121 @@ async def handle_chat_migration(update: Update, context: ContextTypes.DEFAULT_TY
     new_id = msg.migrate_to_chat_id
     db = get_database()
     await db.migrate_chat(old_id, new_id)
+
+
+_FEEDBACK_TEMPLATES = {
+    "bug": "Пользователь {name} сообщает о баге:\n{description}",
+    "feature": "Пользователь {name} предлагает новую фичу:\n{description}",
+}
+
+
+def _build_feedback_header(kind: str, first_name: str, description: str) -> str:
+    template = _FEEDBACK_TEMPLATES[kind]
+    return template.format(name=first_name, description=description or "(без описания)")
+
+
+async def _send_feedback_to_admin(
+    bot, admin_id: int, header: str, media: list | None = None
+) -> bool:
+    try:
+        if media and len(media) == 1:
+            item = media[0]
+            if item["type"] == "photo":
+                await bot.send_photo(chat_id=admin_id, photo=item["file_id"], caption=header)
+            else:
+                await bot.send_video(chat_id=admin_id, video=item["file_id"], caption=header)
+        elif media and len(media) > 1:
+            input_media = []
+            for i, item in enumerate(media):
+                caption = header if i == 0 else None
+                if item["type"] == "photo":
+                    input_media.append(InputMediaPhoto(media=item["file_id"], caption=caption))
+                else:
+                    input_media.append(InputMediaVideo(media=item["file_id"], caption=caption))
+            await bot.send_media_group(chat_id=admin_id, media=input_media)
+        else:
+            await bot.send_message(chat_id=admin_id, text=header)
+        return True
+    except Exception:
+        logger.exception("Failed to send feedback to admin")
+        return False
+
+
+async def _process_media_group_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    data = context.job.data
+    key = data["key"]
+    stored = context.bot_data.pop(key, None)
+    if not stored:
+        return
+    header = stored["header"]
+    media = stored["media"]
+    chat_id = stored["chat_id"]
+    admin_id = stored["admin_id"]
+    ok = await _send_feedback_to_admin(context.bot, admin_id, header, media)
+    reply = "Передано боссу!" if ok else "Не удалось отправить сообщение администратору."
+    await context.bot.send_message(chat_id=chat_id, text=reply)
+
+
+async def _handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str) -> None:
+    settings = get_settings().require()
+    admin_id = settings.admin_user_id
+    if not admin_id:
+        await update.message.reply_text("Администратор не настроен.")
+        return
+
+    first_name = update.message.from_user.first_name or "Неизвестный"
+    msg = update.message
+
+    if msg.photo or msg.video:
+        caption = msg.caption or ""
+        description = caption.split(None, 1)[1] if len(caption.split(None, 1)) > 1 else ""
+    else:
+        description = " ".join(context.args) if context.args else ""
+
+    header = _build_feedback_header(kind, first_name, description)
+
+    media_item = None
+    if msg.photo:
+        media_item = {"type": "photo", "file_id": msg.photo[-1].file_id}
+    elif msg.video:
+        media_item = {"type": "video", "file_id": msg.video.file_id}
+
+    if msg.media_group_id:
+        key = f"feedback_mg_{msg.media_group_id}"
+        if key not in context.bot_data:
+            context.bot_data[key] = {
+                "header": header,
+                "media": [],
+                "chat_id": msg.chat_id,
+                "admin_id": admin_id,
+            }
+            context.job_queue.run_once(
+                _process_media_group_job, 1.5, data={"key": key}
+            )
+        if media_item:
+            context.bot_data[key]["media"].append(media_item)
+        return
+
+    media = [media_item] if media_item else None
+    ok = await _send_feedback_to_admin(context.bot, admin_id, header, media)
+    reply = "Передано боссу!" if ok else "Не удалось отправить сообщение администратору."
+    await update.message.reply_text(reply)
+
+
+async def handle_bug_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _handle_feedback(update, context, "bug")
+
+
+async def handle_bug_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _handle_feedback(update, context, "bug")
+
+
+async def handle_feature_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _handle_feedback(update, context, "feature")
+
+
+async def handle_feature_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _handle_feedback(update, context, "feature")
 
 
 def build_say_conversation_handler():
